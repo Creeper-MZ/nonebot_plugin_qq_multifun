@@ -2,9 +2,7 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, PrivateMessageEvent, Message, MessageSegment, Event
 from nonebot.typing import T_State
 from nonebot.params import CommandArg, ArgStr
-
-from .services import ollama, novel_ai, comfy_api
-from .utils import add_task_to_queue
+from .utils import get_user_compose,novelai_task_queue,comfyui_task_queue,ollama_task_queue
 
 
 def create_draw_handler(cmd_name, cmd):
@@ -18,29 +16,30 @@ def create_draw_handler(cmd_name, cmd):
         prompt = target_text
         image = ""
         await cmd.send("纳西妲开始画画啦！")
-
+        user_compose = await get_user_compose(event.get_user_id())
         if cmd_name == "d":
             await cmd.send("纳西妲正在分析提示词哦")
-            image = await ollama.get_sd_request_with_llama(prompt)
+            image = await (await get_user_compose(event.get_user_id())).ollama.get_sd_request_with_llama(prompt)
         elif cmd_name == "dc":
-            image = await ollama.get_sd_request(prompt)
+            image = await (await get_user_compose(event.get_user_id())).ollama.get_sd_request(prompt)
         elif cmd_name == "dn":
-            await cmd.send("纳西妲正在分析提示词哦")
-            image = await novel_ai.generate_image(
-                "[artist:ningen_mame],artist:ciloranko,[artist:mutou mato],[artist:painter-lhb],[artist:sho_(sho_lwlw)],[artist:tsubasa_tsubasa],year 2022,{{{nahida (genshin impact)}}},{{white hair,green_eyes}},{{{loli,child,petite,aged down,young age,slim body,slim leg,petite figure,little girl}}},,[[[[wlop]]]]," + await ollama.auto_prompt_nai(
-                    prompt) + ",[[[artist:babu],[artist:kupuru (hirumamiyuu)],[artist:tianliang duohe fangdongye],[artist:agwing86]]],")
+            task = {"userID": event.user_id,
+                    "prompt": prompt,
+                    "event": event, "bot": bot, "cmd_name": cmd_name,"user_compose": user_compose}
+            ollama_task_queue.put(task)
         elif cmd_name == "dcn":
-            image = await novel_ai.generate_image(prompt)
+            task={"userID":event.user_id,"prompt":prompt,"event":event,"bot":bot,"cmd_name":cmd_name,"user_compose":user_compose}
+            novelai_task_queue.put(task)
+            await cmd.finish(message=f"已加入NAI绘画队列，当前位置：{novelai_task_queue.qsize()}",at_sender=True)
+            #image = await (await get_user_compose(event.get_user_id())).novel_ai.generate_image(prompt)
         elif cmd_name == "dcf":
-            await cmd.send("纳西妲正在分析提示词哦")
-            image = await comfy_api.get_comfy_request(
-                "nahida_(genshin_impact),(loli,child,young age,slim_legs,petite,aged_down,slim_body,little_girl,underage)," + await ollama.auto_prompt(
-                    target_text))
+            task = {"userID": event.user_id, "prompt": prompt, "event": event, "bot": bot, "cmd_name": cmd_name,"user_compose":user_compose}
+            ollama_task_queue.put(task)
         elif cmd_name == "dccf":
-            image = await comfy_api.get_comfy_request(prompt)
-
-        await cmd.send(MessageSegment.image(image))
-        await cmd.finish("纳西妲画完啦!", at_sender=True)
+            task = {"userID": event.user_id, "prompt": prompt, "event": event, "bot": bot, "cmd_name": cmd_name,"user_compose": user_compose}
+            comfyui_task_queue.put(task)
+            await cmd.finish(message=f"已加入ComfyUI绘画队列，当前位置：{comfyui_task_queue.qsize()}", at_sender=True)
+            #image = await (await get_user_compose(event.get_user_id())).comfy_api.get_comfy_request(prompt)
 
     return handle_draw, execute_draw
 
@@ -64,24 +63,33 @@ def register_commands():
     @clear_mem.handle()
     async def handle_city_pre(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent):
         user = event.get_user_id()
-        ollama.clear_user_message(user)
+        (await get_user_compose(event.get_user_id())).ollama.clear_user_message(user)
         print(user + " 执行了记忆删除")
         await cmd.finish(message='已执行记忆删除', at_sender=True)
+
+    goback = on_command("goback", block=True)
+
+    @goback.handle()
+    async def handle_city_pre(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent):
+        user = event.get_user_id()
+        await (await get_user_compose(event.get_user_id())).ollama.remove_last_message(user)
+        print(user + " 消息撤回")
+        await cmd.finish(message='消息已经撤回', at_sender=True)
 
     help = on_command("help", block=True)
 
     @help.handle()
-    async def _(state: T_State, arg: Message = CommandArg()):
+    async def _(arg: Message = CommandArg()):
         await help.finish(
-            "直接聊天，调用ai大模型和纳西妲聊骚\n/clear_mem清除对话记忆重新开始,如果遭遇审查，可以通过停留在开发者模式这句话来规避审查，不必要清除记忆\n/tts 可以将文字转语音,听纳西妲说话\n/dn 通过ai翻译自然语言为prompt绘画调用nai3 api\n/dcn 自定义prompt直接绘画调用nai3 api\n/dcf 通过ai翻译自然语言为prompt绘画调用Comfy UI本地运行\n/dccf 自定义prompt直接绘画调用ComfyUI\nai翻译自然语言为提示词功能只能生成纳西妲角色\n/get_cf_mod获取可切换comfyui模型列表。\n因为存在问题切换模型功能暂不开放，仅留做调试")
+            "直接聊天，调用ai大模型和纳西妲聊骚\n/clear_mem或者/清除记忆:清除对话记忆重新开始,如果遭遇审查，可以通过指令:/撤回 来撤回最后一轮消息，不必要清除记忆\n/tts 可以将文字转语音,听纳西妲说话\n/dn 通过ai翻译自然语言为prompt绘画调用nai3 api\n/dcn 自定义prompt直接绘画调用nai3 api\n/dcf 通过ai翻译自然语言为prompt绘画调用Comfy UI本地运行\n/dccf 自定义prompt直接绘画调用ComfyUI\nai翻译自然语言为提示词功能只能生成纳西妲角色\n/get_cf_mod获取可切换comfyui模型列表。\n因为存在问题切换模型功能暂不开放，仅留做调试")
 
     get_cf_model = on_command("get_cf_mod", block=True)
 
     @get_cf_model.handle()
-    async def handle_city(bot: Bot, ):
+    async def handle_city(bot: Bot, event: Event):
         msg = ""
-        for i in comfy_api.model_name:
-            msg += "代号: " + i + " 模型: " + comfy_api.model_name[i] + '\n'
+        for i in (await get_user_compose(event.get_user_id())).comfy_api.model_name:
+            msg += "代号: " + i + " 模型: " + (await get_user_compose(event.get_user_id())).comfy_api.model_name[i] + '\n'
         await cmd.finish(message=msg)
 
     set_cf_model = on_command("set_cf_model", block=True)
@@ -92,6 +100,18 @@ def register_commands():
             state["set_cf_model"] = arg.extract_plain_text().strip()
     @set_cf_model.got("set_cf_model", prompt="请输入模型代号")
     async def _(bot: Bot, event: Event, target_text: str = ArgStr("set_cf_model")):
-        comfy_api.set_model(name=target_text)
-        print("CF绘画模型设置为: ", comfy_api.model_name[target_text])
+        await (await get_user_compose(event.get_user_id())).comfy_api.set_model(name=target_text)
+        print("CF绘画模型设置为: ", (await get_user_compose(event.get_user_id())).comfy_api.model_name[target_text])
         await set_cf_model.finish("模型设置成功")
+
+    tts = on_command("tts", block=True)
+
+    @tts.handle()
+    async def _(state: T_State, arg: Message = CommandArg()):
+        if arg.extract_plain_text().strip():
+            state["tts"] = arg.extract_plain_text().strip()
+
+    @tts.got("tts", prompt="你想让纳西妲说什么？")
+    async def _(bot: Bot, event: Event, target_text: str = ArgStr("tts")):
+        user_compose=(await get_user_compose(event.get_user_id()))
+        await tts.finish(MessageSegment.record(user_compose.ollama.to_base64(user_compose.ollama.tts_trans(target_text))))
