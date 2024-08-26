@@ -1,5 +1,5 @@
 # QQ_DrawBot
- 一个QQ的对话，绘画，语音生成机器人，能使用Ollama，Comfyui，sdwebui，NAI3
+ 一个QQ的对话，绘画，语音生成瑟瑟机器人，能使用Ollama,ChatGPT,Claude,Comfyui,sdwebui,NAI3的API
 ### 参考了B站大佬: 
 @啥都会一点的鼠鼠 的机器人代码。我自己是个小白，代码是边谷歌边写的，所以很乱，还望包含。
 # 最新更新：将bot改为了nonebot的插件形式，移除了机器人的部署部分，如果要下载机器人本体，那么还是去下载0.0.1的版本，之后把1.0.0放在插件目录
