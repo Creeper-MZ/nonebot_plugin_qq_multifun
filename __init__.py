@@ -7,7 +7,7 @@ from nonebot.rule import to_me
 from .logger import log_with_timestamp
 from .config import CONFIG
 from .commands import register_commands
-from .utils import run_loop, run_comfyui_queue_in_thread, run_novelai_queue_in_thread, resolve_user, process_message, \
+from .utils import run_loop, run_comfyui_queue_in_thread, run_novelai_queue_in_thread, resolve_user, \
     process_message_queue, get_user_compose,ollama_task_queue,run_ollama_queue_in_thread
 from .utils import run_comfyui_queue,run_novelai_queue
 main_handler = on_message(rule=to_me(), priority=98)

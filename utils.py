@@ -26,12 +26,19 @@ async def process_message_queue():
             log_with_timestamp("LLM队列获取到任务")
             user_compose = task["user_compose"]
             log_with_timestamp("获取到用户")
-            await user_compose.ollama.add_user(user_compose.userID)
+            user_compose.ollama.add_user(user_compose.userID)
             log_with_timestamp("LLM用户检索成功")
             response = await user_compose.ollama.get_claude_request(user_compose.userID,task["prompt"])
+            if response.find("<hide>") != -1:
+                response=response.replace("<hide>",'')
+            if response.find("</hide>") != -1:
+                response=response.replace("</hide>",'')
             #response = await user_compose.ollama.get_request(user_compose.userID, task["prompt"])
             log_with_timestamp("成功获得LLM响应")
-
+            if response.find("@draw") != -1:
+                response=response.replace("@draw",'')
+                novelai_task_queue.put({"prompt":await user_compose.ollama.auto_prompt_nai_with_claude(response),"event":task["event"],"bot":task["bot"],"cmd_name":'dcn',"user_compose":user_compose})
+                log_with_timestamp("检测到绘画")
             try:
                 await asyncio.wait_for(task["bot"].send(event=task["event"], message=response, at_sender=True),timeout=1)
             except asyncio.TimeoutError:
@@ -43,9 +50,8 @@ async def process_message_queue():
             log_with_timestamp("获取到用户")
             if cmd_name == 'dn':
                 draw_prompt=await user_compose.ollama.auto_prompt_nai_with_claude(task["prompt"])
-                novelai_task_queue.put(
-                    {"cmd_name": "dcn", "prompt": "[artist:ningen_mame],artist:ciloranko,[artist:mutou mato],[artist:painter-lhb],[artist:sho_(sho_lwlw)],[artist:tsubasa_tsubasa],year 2022,{{{nahida (genshin impact)}}},{{white hair,green_eyes}},{{{loli,child,petite,aged down,young age,slim body,slim leg,petite figure,little girl}}},,[[[[wlop]]]]," + draw_prompt + ",[[[artist:babu],[artist:kupuru (hirumamiyuu)],[artist:tianliang duohe fangdongye],[artist:agwing86]]]", "bot": task["bot"], "user_compose": user_compose,
-                     "event": task["event"]})
+                novelai_task_queue.put({"prompt":draw_prompt,"event":task["event"],"bot":task["bot"],"cmd_name":'dcn',"user_compose":user_compose})
+
             else:
                 draw_prompt=await user_compose.ollama.auto_prompt_with_claude(task["prompt"])
                 comfyui_task_queue.put(
@@ -54,7 +60,7 @@ async def process_message_queue():
             log_with_timestamp("提示词获取成功，转绘画队列")
 
             try:
-                await asyncio.wait_for(task["bot"].send(event=task["event"], message=f"提示词获取成功，转入NAI绘画队列，当前位置：{novelai_task_queue.qsize()}", at_sender=True),
+                await asyncio.wait_for(task["bot"].send(event=task["event"], message=f"提示词获取成功，转入绘画队列，当前位置：{novelai_task_queue.qsize()}", at_sender=True),
                                        timeout=1)
             except asyncio.TimeoutError:
                 log_with_timestamp("DN已执行超时强制跳过")
@@ -72,12 +78,26 @@ async def run_novelai_queue():
             log_with_timestamp("NAI队列获取到任务")
             user_compose = task["user_compose"]
             log_with_timestamp("获取到用户")
+            image = await user_compose.novel_ai.generate_image(user_compose.novel_ai.get_artist_prompt()+task["prompt"])
+            log_with_timestamp("NAI图像生成完毕")
+            try:
+                # wait for a task to complete
+                await asyncio.wait_for(task["bot"].send(event=task["event"], message=Message(
+                    [MessageSegment.image(image), MessageSegment.text("纳西妲画完啦！")]),at_sender=True), timeout=1)
+            except asyncio.TimeoutError:
+                log_with_timestamp("NAI已执行超时强制跳过")
+            log_with_timestamp("NAI图像发送成功")
+            log_with_timestamp("NAI任务执行完成，等待下一任务")
+        elif task["cmd_name"] == 'dcnp':
+            log_with_timestamp("NAI队列获取到任务")
+            user_compose = task["user_compose"]
+            log_with_timestamp("获取到用户")
             image = await user_compose.novel_ai.generate_image(task["prompt"])
             log_with_timestamp("NAI图像生成完毕")
             try:
                 # wait for a task to complete
                 await asyncio.wait_for(task["bot"].send(event=task["event"], message=Message(
-                    [MessageSegment.image(image), MessageSegment.text("纳西妲画完啦！")])), timeout=1)
+                    [MessageSegment.image(image), MessageSegment.text("纳西妲画完啦！")]), at_sender=True), timeout=1)
             except asyncio.TimeoutError:
                 log_with_timestamp("NAI已执行超时强制跳过")
             log_with_timestamp("NAI图像发送成功")
@@ -152,18 +172,6 @@ async def resolve_user(bot: Bot, event: GroupMessageEvent | PrivateMessageEvent)
         except Exception as e:
             print(f'获取好友信息失败: {event.user_id}-{e}')
             return str(event.user_id)
-
-
-async def process_message(user: str, message: str) -> str:
-    user_compose = (await get_user_compose(user)).ollama.add_user(user)
-    response = user_compose.ollama.get_request(user, message)
-    print(f"发送给: {user}\n{response}")
-    with open('record.txt', 'a', encoding='utf8') as f:
-        f.write(f'{user}:{message} AI:{response}\n')
-    return response
-
-
-# Message queue
 
 
 def log_error(error: Exception, context: str):
